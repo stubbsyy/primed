@@ -688,6 +688,7 @@ primed build file.pm -o out  # native binary
 primed install file.pm       # -> ~/.local/bin/<name>
 primed transpile file.pm     # print generated rust
 primed tokens file.pm        # token count report
+primed doc file.pm [--mcp]   # JSON metadata + transpiled rust for agents
 primed cheat                 # this sheet
 
 ## example
@@ -696,3 +697,37 @@ f main()
   if cmd == "add"
     append(home() + "/notes.txt", arg(2) + "\n")
 "#;
+
+pub fn list_fns(src: &str, path: &str) -> Result<Vec<String>, String> {
+    let prog = parse(src, path)?;
+    Ok(prog
+        .nodes
+        .iter()
+        .filter_map(|n| match n {
+            Node::FnDef { sig, .. } => Some(format!(
+                "{}({}){}",
+                sig.name,
+                sig.params.join(","),
+                sig.ret.map(|r| format!(" {r}")).unwrap_or_default()
+            )),
+            _ => None,
+        })
+        .collect())
+}
+
+pub fn list_tools(src: &str, path: &str) -> Result<Vec<(String, String)>, String> {
+    let prog = parse(src, path)?;
+    Ok(prog.tools.clone())
+}
+
+pub fn list_structs(src: &str, path: &str) -> Result<Vec<String>, String> {
+    let prog = parse(src, path)?;
+    Ok(prog
+        .nodes
+        .iter()
+        .filter_map(|n| match n {
+            Node::Struct { name, .. } => Some(name.clone()),
+            _ => None,
+        })
+        .collect())
+}
