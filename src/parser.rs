@@ -13,6 +13,7 @@ pub enum Node {
     Struct { name: String, fields: Vec<(String, String)> },
     FnDef { sig: FnSig, body: Vec<Node> },
     ToolDef { sig: FnSig, desc: String, body: Vec<Node> },
+    Use { crates: Vec<String> },
     Var { name: String, mutable: bool, expr: String },
     Assign { name: String, expr: String },
     If { arms: Vec<(Option<String>, Vec<Node>)> },
@@ -26,6 +27,7 @@ pub enum Node {
 pub struct Prog {
     pub nodes: Vec<Node>,
     pub tools: Vec<(String, String)>,
+    pub crates: Vec<String>,
 }
 
 fn ty(t: &str) -> Result<&'static str, String> {
@@ -176,6 +178,38 @@ fn parse_postfix(t: &[Tok], i: &mut usize) -> Result<String, String> {
                 *i += 1;
                 let d = parse_unary(t, i)?;
                 e = format!("pm_dflt({e}, {d})");
+            }
+            Some(Tok::Sym(":")) if matches!(t.get(*i + 1), Some(Tok::Sym(":"))) => {
+                // crate path: a::b (consume both colons)
+                *i += 2;
+                let m = match t.get(*i) {
+                    Some(Tok::Ident(m)) => m.clone(),
+                    _ => return Err("expected name after ::".into()),
+                };
+                *i += 1;
+                if matches!(t.get(*i), Some(Tok::Sym("("))) {
+                    *i += 1;
+                    let mut a = Vec::new();
+                    if !matches!(t.get(*i), Some(Tok::Sym(")"))) {
+                        loop {
+                            a.push(parse_or(t, i)?);
+                            match t.get(*i) {
+                                Some(Tok::Sym(",")) => *i += 1,
+                                _ => break,
+                            }
+                        }
+                    }
+                    expect(t, i, ")")?;
+                    e = format!("{e}::{m}({})", a.join(", "));
+                } else {
+                    e = format!("{e}::{m}");
+                }
+            }
+            Some(Tok::Sym(".")) if matches!(t.get(*i + 1), Some(Tok::Sym("."))) => {
+                // range: a..b -> pass through as rust range
+                *i += 2;
+                let b = parse_add(t, i)?;
+                e = format!("({e}..{b})");
             }
             Some(Tok::Sym(".")) => {
                 *i += 1;
@@ -430,6 +464,62 @@ fn parse_block(
                     return Err(format!("line {ln}: trailing tokens after struct"));
                 }
                 out.push(Node::Struct { name, fields });
+            }
+            Some(Tok::Kw("use")) => {
+                if !top {
+                    return Err(format!("line {ln}: use only at top level"));
+                }
+                let mut j = 1;
+                let mut crates = Vec::new();
+                while j < toks.len() {
+                    match toks.get(j) {
+                        Some(Tok::Ident(c)) => {
+                            let mut spec = c.clone();
+                            j += 1;
+                            // optional features: name[f1,f2]
+                            if matches!(toks.get(j), Some(Tok::Sym("["))) {
+                                j += 1;
+                                let mut feats = Vec::new();
+                                loop {
+                                    match toks.get(j) {
+                                        Some(Tok::Ident(f)) => {
+                                            feats.push(f.clone());
+                                            j += 1;
+                                        }
+                                        _ => {
+                                            return Err(format!(
+                                                "line {ln}: bad feature at pos {j}"
+                                            ))
+                                        }
+                                    }
+                                    match toks.get(j) {
+                                        Some(Tok::Sym(",")) => j += 1,
+                                        Some(Tok::Sym("]")) => {
+                                            j += 1;
+                                            break;
+                                        }
+                                        _ => {
+                                            return Err(format!(
+                                                "line {ln}: expected , or ] in features"
+                                            ))
+                                        }
+                                    }
+                                }
+                                spec = format!("{spec}[{}]", feats.join(","));
+                            }
+                            crates.push(spec);
+                        }
+                        _ => return Err(format!("line {ln}: use needs crate names")),
+                    }
+                    match toks.get(j) {
+                        Some(Tok::Sym(",")) => j += 1,
+                        _ => break,
+                    }
+                }
+                if j != toks.len() {
+                    return Err(format!("line {ln}: trailing tokens after use"));
+                }
+                out.push(Node::Use { crates });
             }
             Some(Tok::Kw("f")) | Some(Tok::Kw("tool")) => {
                 if !top {
@@ -699,5 +789,13 @@ pub fn parse(src: &str, path: &str) -> Result<Prog, String> {
             _ => None,
         })
         .collect();
-    Ok(Prog { nodes, tools })
+    let crates: Vec<String> = nodes
+        .iter()
+        .filter_map(|n| match n {
+            Node::Use { crates } => Some(crates.clone()),
+            _ => None,
+        })
+        .flatten()
+        .collect();
+    Ok(Prog { nodes, tools, crates })
 }

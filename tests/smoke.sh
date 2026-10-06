@@ -151,4 +151,10 @@ grep -q "watched" /tmp/pm_watch.log || { echo "FAIL watch rerun"; exit 1; }
 grep -q "recompiled ok" /tmp/pm_watch.log || { echo "FAIL watch recompile"; exit 1; }
 rm -f /tmp/pm_watch_test.pm /tmp/pm_watch.log
 
+echo "== phase9 ffi =="
+out=$($BIN run examples/dice.pm 3 2>/dev/null | grep -E 'rolls|error' | head -1)
+echo "$out" | grep -q "rolls:" || { echo "FAIL ffi dice (needs crates.io access)"; exit 1; }
+out=$($BIN run examples/uuid_id.pm 2>/dev/null | grep -E 'id:|error' | head -1)
+echo "$out" | grep -q "id: " || { echo "FAIL ffi uuid (needs crates.io access)"; exit 1; }
+
 echo "ALL PASS"

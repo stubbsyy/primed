@@ -244,6 +244,16 @@ fn main() {
             }
         }
         "run" | "build" => {
+            // crates present? -> cargo project path
+            let out_arg = argv.iter().position(|a| a == "-o").and_then(|k| argv.get(k + 1)).cloned();
+            match cargo_build_run(&src, file, &argv[3..], out_arg.as_deref()) {
+                Ok(Some(code)) => exit(code),
+                Ok(None) => {}
+                Err(e) => {
+                    eprintln!("primed: {e}");
+                    exit(1);
+                }
+            }
             let out = if cmd == "build" {
                 let mut o = "a.out".to_string();
                 let mut k = 3;
@@ -323,6 +333,71 @@ fn est_tokens(s: &str) -> usize {
         })
         .count();
     (chars + syms) / 4
+}
+
+fn cargo_build_run(
+    src: &str,
+    file: &str,
+    args: &[String],
+    out: Option<&str>,
+) -> Result<Option<i32>, String> {
+    let crates = gen::list_crates(src, file)?;
+    if crates.is_empty() {
+        return Ok(None);
+    }
+    let dir = std::env::temp_dir().join("primed-cargo");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("src"))
+        .map_err(|e| format!("mkdir: {e}"))?;
+    let deps: String = crates
+        .iter()
+        .map(|c| {
+            if let Some((name, feats)) = c.split_once('[') {
+                let feats = feats.trim_end_matches(']');
+                let fq: Vec<String> = feats
+                    .split(',')
+                    .map(|f| format!("\"{}\"", f.trim()))
+                    .collect();
+                format!("{name} = {{ version = \"*\", features = [{}] }}\n", fq.join(","))
+            } else {
+                format!("{c} = \"*\"\n")
+            }
+        })
+        .collect();
+    std::fs::write(
+        dir.join("Cargo.toml"),
+        format!("[package]\nname = \"primed_app\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n{deps}"),
+    )
+    .map_err(|e| e.to_string())?;
+    let rs = gen::gen(src, file)?;
+    std::fs::write(dir.join("src/main.rs"), rs).map_err(|e| e.to_string())?;
+    let build = std::process::Command::new("cargo")
+        .arg("build")
+        .arg("--release")
+        .current_dir(&dir)
+        .output()
+        .map_err(|e| format!("cargo: {e}"))?;
+    if !build.status.success() {
+        return Err(format!(
+            "cargo build failed:\n{}",
+            String::from_utf8_lossy(&build.stderr)
+        ));
+    }
+    let bin = dir.join("target/release/primed_app");
+    match out {
+        Some(o) => {
+            std::fs::copy(&bin, o).map_err(|e| format!("install: {e}"))?;
+            Ok(Some(0))
+        }
+        None => {
+            let code = std::process::Command::new(&bin)
+                .args(args)
+                .status()
+                .map(|s| s.code().unwrap_or(1))
+                .unwrap_or(1);
+            Ok(Some(code))
+        }
+    }
 }
 
 fn watch_cmd(file: &str, args: &[String]) -> ! {

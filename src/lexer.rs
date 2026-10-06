@@ -106,6 +106,11 @@ pub fn lex_line(line: &str) -> Result<Vec<Tok>, String> {
                     if isf {
                         break;
                     }
+                    // a '.' only counts as decimal point if a digit follows;
+                    // otherwise it's a range (1..7) or field access
+                    if !(i + 1 < n && b[i + 1].is_ascii_digit()) {
+                        break;
+                    }
                     isf = true;
                 }
                 i += 1;
@@ -137,6 +142,7 @@ pub fn lex_line(line: &str) -> Result<Vec<Tok>, String> {
                 "false" => Some("false"),
                 "t" => Some("t"),
                 "tool" => Some("tool"),
+                "use" => Some("use"),
                 "each" => Some("each"),
                 _ => None,
             };
