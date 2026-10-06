@@ -138,4 +138,8 @@ The intended workflow for LLM-driven development:
 
 ## Roadmap
 
-- Phase 5: web/API/MCP shorthands, JSON output mode, transpile-on-save watch
+- **Phase 5 — Web/API shorthands**: `srv(port)` starts an HTTP server; `route(path, method)` handlers; JSON helpers (`jget jstr jnum jbool`). Target: a working API in 3 lines of primed.
+- **Phase 6 — MCP server support**: `primed mcp file.pm` speaks the MCP protocol over stdio so LLM hosts can call your app as a tool.
+- **Phase 7 — JSON output mode**: `primed doc file.pm --json` emits machine-readable output (transpiled Rust, AST metadata, token counts) so agents can self-verify without parsing prose.
+- **Phase 8 — Watch mode**: `primed watch file.pm` re-transpiles and re-runs on save.
+- **Phase 9 — Rust FFI / external crates**: `use crate_name` pulls in external Rust libraries; primed calls map to their public APIs with typed wrappers, so the whole Rust ecosystem stays available while source stays token-dense.

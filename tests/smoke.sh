@@ -72,4 +72,30 @@ echo "$out" | grep -q "tokens" || { echo "FAIL tokens report"; exit 1; }
 out=$($BIN transpile examples/hello.pm)
 echo "$out" | grep -q "fn main" || { echo "FAIL transpile output"; exit 1; }
 
+echo "== phase5 web =="
+$BIN build examples/api.pm -o /tmp/pm_api_test >/dev/null 2>&1
+/tmp/pm_api_test >/dev/null 2>&1 &
+SRV=$!
+sleep 1
+out=$(python3 - <<'PYCHK'
+import socket
+try:
+    s=socket.create_connection(("127.0.0.1",8091),timeout=2)
+    print("skip")
+except Exception:
+    # server binds 8080; check that
+    try:
+        s=socket.create_connection(("127.0.0.1",8080),timeout=2)
+        s.sendall(b"GET / HTTP/1.1\r\nHost: x\r\n\r\n")
+        d=s.recv(4096).decode()
+        print("OK" if "hello from primed" in d else "BAD")
+    except Exception as e:
+        print("CONN:"+str(e))
+PYCHK
+)
+kill $SRV 2>/dev/null
+[ "$out" = "OK" ] || { echo "FAIL api server: $out"; exit 1; }
+out=$($BIN transpile examples/api.pm)
+echo "$out" | grep -q "fn main" || { echo "FAIL api transpile"; exit 1; }
+
 echo "ALL PASS"
