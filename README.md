@@ -89,7 +89,28 @@ f main()
 Examples: `hello.pm`, `notes.pm`, `phase2.pm`, `todo.pm` (full task manager in
 ~1.6KB).
 
+## Phase 3 features
+
+Time, terminal interaction, and app installation:
+
+| primed            | meaning                                  |
+|-------------------|------------------------------------------|
+| `clock()`         | `"2026-10-06 14:32"` timestamp           |
+| `today()`         | `"2026-10-06"` date                      |
+| `sleep(ms)`       | pause the program                        |
+| `ask("prompt: ")` | read a line from stdin                   |
+| `cls()`           | clear the terminal                        |
+| `primed install file.pm` | compile + install to `~/.local/bin` |
+
+New apps: `timer.pm` (pomodoro countdown), `journal.pm` (searchable daily
+journal). Install any of them:
+
+```sh
+./target/release/primed install examples/journal.pm
+journal write "shipped phase 3"
+journal find "phase"
+```
+
 ## Roadmap
 
-- Phase 3: example macOS apps (notes, timer), packaged binaries
 - Phase 4: web/API/MCP shorthands, LLM-oriented tooling (transpile-on-save, size linter)

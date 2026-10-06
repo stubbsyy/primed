@@ -7,7 +7,9 @@ mod parser;
 fn main() {
     let argv: Vec<String> = std::env::args().collect();
     if argv.len() < 3 {
-        eprintln!("usage: primed run|build|transpile file.pm [args... | -o out]");
+        eprintln!(
+            "usage: primed run|build|install|transpile file.pm [args... | -o out]"
+        );
         exit(2);
     }
     let cmd = argv[1].as_str();
@@ -29,6 +31,55 @@ fn main() {
     match cmd {
         "transpile" => {
             print!("{rs}");
+        }
+        "install" => {
+            let bin = std::path::Path::new(file)
+                .file_stem()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_else(|| "app".into());
+            let dest_dir = std::env::var("HOME")
+                .map(|h| format!("{h}/.local/bin"))
+                .unwrap_or_else(|_| "/usr/local/bin".into());
+            if std::fs::create_dir_all(&dest_dir).is_err() {
+                eprintln!("primed: cannot create {dest_dir}");
+                exit(1);
+            }
+            let dest = format!("{dest_dir}/{bin}");
+            let tmp = std::env::temp_dir().join(format!("primed-{bin}"));
+            let rs_path = tmp.to_string_lossy().to_string() + ".rs";
+            if let Err(e) = std::fs::write(&rs_path, &rs) {
+                eprintln!("primed: cannot write {rs_path}: {e}");
+                exit(1);
+            }
+            let status = std::process::Command::new("rustc")
+                .arg("-O")
+                .arg("--edition")
+                .arg("2021")
+                .arg("-o")
+                .arg(&tmp)
+                .arg(&rs_path)
+                .status();
+            match status {
+                Ok(s) if s.success() => {
+                    if std::fs::rename(&tmp, &dest).is_err() {
+                        eprintln!("primed: cannot install to {dest}");
+                        exit(1);
+                    }
+                    let _ = std::fs::remove_file(&rs_path);
+                    println!("installed: {dest}");
+                    if !dest_dir.is_empty() {
+                        println!("make sure {dest_dir} is on PATH");
+                    }
+                }
+                Ok(s) => {
+                    eprintln!("primed: rustc failed: {s}");
+                    exit(1);
+                }
+                Err(e) => {
+                    eprintln!("primed: cannot invoke rustc: {e}");
+                    exit(1);
+                }
+            }
         }
         "run" | "build" => {
             let out = if cmd == "build" {
