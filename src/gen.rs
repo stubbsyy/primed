@@ -436,6 +436,7 @@ fn map_builtins(e: &str) -> String {
 fn gen_node(n: &Node, ind: usize, out: &mut String) {
     let pad = "  ".repeat(ind);
     match n {
+        Node::Use { .. } => {}
         Node::Struct { name, fields } => {
             let rn = camel(name);
             out.push_str(&format!(
@@ -671,6 +672,11 @@ read(path) write(path, s) append(path, s)   # read of missing file = ""
 ask("prompt")          # stdin line
 arg(i) argn() home() now() clock() today() sleep(ms) cls() quit(code)
 
+## ffi (phase 9)
+use rand, uuid[v4]          # crates -> cargo build (crates.io)
+crate::fn(args) crate::Type  # call into crate
+x = uuid::Uuid::new_v4().to_string()
+
 ## web (phase 5)
 f h(req s) s ...        # handler: req is JSON string, ret body
 route("/path", h)       # register
@@ -731,4 +737,9 @@ pub fn list_structs(src: &str, path: &str) -> Result<Vec<String>, String> {
             _ => None,
         })
         .collect())
+}
+
+pub fn list_crates(src: &str, path: &str) -> Result<Vec<String>, String> {
+    let prog = parse(src, path)?;
+    Ok(prog.crates.clone())
 }

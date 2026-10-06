@@ -169,10 +169,37 @@ numbers but the watch keeps going — fix and save, it reruns.
 #   primed: recompiled ok, running...
 ```
 
+## Phase 9 features: Rust FFI / external crates
+
+`use` pulls in external Rust crates; primed switches to a cargo build and your
+calls map straight to the crate's API — the whole Rust ecosystem, still
+token-dense:
+
+```primed
+use uuid[v4]
+
+f main()
+  v id = uuid::Uuid::new_v4().to_string()
+  p "id: {id}"
+```
+
+```primed
+use rand
+
+f main()
+  p rand::random_range(1..7)
+```
+
+- `use crate1, crate2` — plain crates, latest version
+- `use name[feature]` — crate with cargo features
+- `crate::fn(args)`, `crate::Type::method()` — call into the crate
+- ranges `a..b` pass through to Rust (for APIs like `random_range(1..7)`)
+- no `use` = zero-dependency `rustc` builds exactly as before
+
 ## Roadmap
 
 - **Phase 5 — Web/API shorthands**: `srv(port)` starts an HTTP server; `route(path, method)` handlers; JSON helpers (`jget jstr jnum jbool`). Target: a working API in 3 lines of primed.
 - **Phase 6 — MCP server support**: `primed mcp file.pm` speaks the MCP protocol over stdio so LLM hosts can call your app as a tool.
 - **Phase 7 — JSON output mode**: `primed doc file.pm --json` emits machine-readable output (transpiled Rust, AST metadata, token counts) so agents can self-verify without parsing prose.
 - **Phase 8 — Watch mode**: `primed watch file.pm` re-transpiles and re-runs on save.
-- **Phase 9 — Rust FFI / external crates**: `use crate_name` pulls in external Rust libraries; primed calls map to their public APIs with typed wrappers, so the whole Rust ecosystem stays available while source stays token-dense.
+~- **Phase 9 — Rust FFI / external crates** ✅: shipped.
