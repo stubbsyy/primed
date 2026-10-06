@@ -136,6 +136,27 @@ The intended workflow for LLM-driven development:
 3. `primed run file.pm` verifies; `primed tokens file.pm` reports cost;
    `primed install file.pm` ships it.
 
+## Phase 7 features: JSON output mode
+
+`primed doc file.pm [--mcp]` emits a single machine-readable JSON object so
+agents can self-verify without parsing prose:
+
+```json
+{
+  "file": "examples/todo.pm",
+  "source": {"bytes": 1718, "tokens_est": 516},
+  "rust": {"bytes": 10385, "tokens_est": 3244},
+  "mode": "bin",
+  "functions": ["db() s", "load() s", "main()"],
+  "tools": [],
+  "structs": [],
+  "rust_source": {"content": "... full transpiled Rust ..."}
+}
+```
+
+An agent can transpile, inspect signatures, check token cost, and read the
+generated Rust — one command, one parse.
+
 ## Roadmap
 
 - **Phase 5 — Web/API shorthands**: `srv(port)` starts an HTTP server; `route(path, method)` handlers; JSON helpers (`jget jstr jnum jbool`). Target: a working API in 3 lines of primed.

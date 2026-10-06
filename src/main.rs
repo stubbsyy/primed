@@ -67,6 +67,78 @@ fn main() {
             }
         }
     }
+    if cmd == "doc" {
+        let file = &argv[2];
+        let src = match std::fs::read_to_string(file) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("primed: cannot read {file}: {e}");
+                exit(2);
+            }
+        };
+        let mcp_mode = argv.iter().any(|a| a == "--mcp");
+        let rs = match gen::gen_mode(&src, file, mcp_mode) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("primed: {e}");
+                exit(1);
+            }
+        };
+        println!("{{");
+        println!("  \"file\": \"{file}\",");
+        println!(
+            "  \"source\": {{\"bytes\": {}, \"tokens_est\": {}}},",
+            src.len(),
+            est_tokens(&src)
+        );
+        println!(
+            "  \"rust\": {{\"bytes\": {}, \"tokens_est\": {}}},",
+            rs.len(),
+            est_tokens(&rs)
+        );
+        println!("  \"mode\": \"{}\",", if mcp_mode { "mcp" } else { "bin" });
+        println!(
+            "  \"functions\": [{}],",
+            gen::list_fns(&src, file)
+                .unwrap_or_default()
+                .iter()
+                .map(|f| format!("\"{f}\""))
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        println!(
+            "  \"tools\": [{}],",
+            gen::list_tools(&src, file)
+                .unwrap_or_default()
+                .iter()
+                .map(|t| format!(
+                    "{{\"name\":\"{}\",\"description\":\"{}\"}}",
+                    t.0, t.1
+                ))
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        println!(
+            "  \"structs\": [{}],",
+            gen::list_structs(&src, file)
+                .unwrap_or_default()
+                .iter()
+                .map(|c| format!("\"{c}\""))
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        println!("  \"rust_source\": {{");
+        let escaped: String = rs
+            .replace('\\', "\\\\")
+            .replace('\"', "\\\"")
+            .replace('\n', "\\n")
+            .replace('\r', "")
+            .replace('\t', "\\t");
+        println!("    \"content\": \"{escaped}\"");
+        println!("  }}");
+        println!("}}");
+        exit(0);
+    }
     if cmd == "cheat" {
         print!("{}", gen::CHEATSHEET);
         exit(0);

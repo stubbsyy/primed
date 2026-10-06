@@ -116,4 +116,26 @@ echo "$out" | grep -q "protocolVersion" || { echo "FAIL mcp initialize"; exit 1;
 echo "$out" | grep -q "add_note" || { echo "FAIL mcp tools/list"; exit 1; }
 echo "$out" | grep -q "note_count" || { echo "FAIL mcp tools/call"; exit 1; }
 
+echo "== phase7 doc =="
+$BIN doc examples/todo.pm 2>/dev/null | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+assert 'main()' in d['functions'], 'functions'
+assert d['source']['tokens_est']>0, 'tokens'
+print('ok')
+" || { echo "FAIL doc json"; exit 1; }
+$BIN doc examples/mcp_notes.pm --mcp 2>/dev/null | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+assert d['mode']=='mcp', 'mode'
+assert any(t['name']=='add_note' for t in d['tools']), 'tools'
+print('ok')
+" || { echo "FAIL doc mcp"; exit 1; }
+$BIN doc examples/phase2.pm 2>/dev/null | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+assert 'note' in d['structs'], 'structs'
+print('ok')
+" || { echo "FAIL doc structs"; exit 1; }
+
 echo "ALL PASS"
