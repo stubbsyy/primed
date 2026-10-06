@@ -136,6 +136,7 @@ pub fn lex_line(line: &str) -> Result<Vec<Tok>, String> {
                 "true" => Some("true"),
                 "false" => Some("false"),
                 "t" => Some("t"),
+                "tool" => Some("tool"),
                 "each" => Some("each"),
                 _ => None,
             };

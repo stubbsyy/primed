@@ -98,4 +98,22 @@ kill $SRV 2>/dev/null
 out=$($BIN transpile examples/api.pm)
 echo "$out" | grep -q "fn main" || { echo "FAIL api transpile"; exit 1; }
 
+echo "== phase6 mcp =="
+out=$(python3 - <<'PYMCP'
+import subprocess
+reqs='\n'.join([
+ '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}',
+ '{"jsonrpc":"2.0","id":2,"method":"tools/list"}',
+ '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"note_count","arguments":{}}}',
+])+'\n'
+import os
+os.environ["HOME"]=os.path.expanduser("~")
+p=subprocess.run(["./target/release/primed","mcp","examples/mcp_notes.pm"],input=reqs,capture_output=True,text=True)
+print(p.stdout)
+PYMCP
+)
+echo "$out" | grep -q "protocolVersion" || { echo "FAIL mcp initialize"; exit 1; }
+echo "$out" | grep -q "add_note" || { echo "FAIL mcp tools/list"; exit 1; }
+echo "$out" | grep -q "note_count" || { echo "FAIL mcp tools/call"; exit 1; }
+
 echo "ALL PASS"

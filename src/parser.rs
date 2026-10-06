@@ -12,6 +12,7 @@ pub struct FnSig {
 pub enum Node {
     Struct { name: String, fields: Vec<(String, String)> },
     FnDef { sig: FnSig, body: Vec<Node> },
+    ToolDef { sig: FnSig, desc: String, body: Vec<Node> },
     Var { name: String, mutable: bool, expr: String },
     Assign { name: String, expr: String },
     If { arms: Vec<(Option<String>, Vec<Node>)> },
@@ -24,6 +25,7 @@ pub enum Node {
 
 pub struct Prog {
     pub nodes: Vec<Node>,
+    pub tools: Vec<(String, String)>,
 }
 
 fn ty(t: &str) -> Result<&'static str, String> {
@@ -429,7 +431,7 @@ fn parse_block(
                 }
                 out.push(Node::Struct { name, fields });
             }
-            Some(Tok::Kw("f")) => {
+            Some(Tok::Kw("f")) | Some(Tok::Kw("tool")) => {
                 if !top {
                     return Err(format!(
                         "line {ln}: functions can only be declared at top level"
@@ -440,6 +442,7 @@ fn parse_block(
                 {
                     return Err(format!("line {ln}: f needs name(params)"));
                 }
+                let is_tool = matches!(toks[0], Tok::Kw("tool"));
                 let name = match &toks[1] {
                     Tok::Ident(n) => n.clone(),
                     _ => unreachable!(),
@@ -483,14 +486,34 @@ fn parse_block(
                         return Err(format!("line {ln}: unknown return type {t}"));
                     }
                 }
-                if toks.len() != j + if ret.is_some() { 1 } else { 0 } {
+                let extra = if is_tool && matches!(toks.last(), Some(Tok::Str(..))) {
+                    1
+                } else {
+                    0
+                };
+                if toks.len() != j + if ret.is_some() { 1 } else { 0 } + extra {
                     return Err(format!("line {ln}: trailing tokens after f"));
                 }
+                // tool may carry a trailing string literal as description
+                let mut desc = String::new();
+                if is_tool {
+                    if let Some(Tok::Str(l, _)) = toks.last() {
+                        if toks.len() > j { desc = l.clone(); }
+                    }
+                }
                 let body = parse_block(lines, i, indent + 1, mutable, false)?;
-                out.push(Node::FnDef {
-                    sig: FnSig { name, params, ret },
-                    body,
-                });
+                if is_tool {
+                    out.push(Node::ToolDef {
+                        sig: FnSig { name: name.clone(), params, ret },
+                        desc,
+                        body,
+                    });
+                } else {
+                    out.push(Node::FnDef {
+                        sig: FnSig { name, params, ret },
+                        body,
+                    });
+                }
             }
             Some(Tok::Kw("v")) | Some(Tok::Kw("m")) => {
                 let ism = matches!(toks[0], Tok::Kw("m"));
@@ -669,5 +692,12 @@ pub fn parse(src: &str, path: &str) -> Result<Prog, String> {
     if i != lines.len() {
         return Err(format!("{path}: unexpected top-level indent"));
     }
-    Ok(Prog { nodes })
+    let tools: Vec<(String, String)> = nodes
+        .iter()
+        .filter_map(|n| match n {
+            Node::ToolDef { sig, desc, .. } => Some((sig.name.clone(), desc.clone())),
+            _ => None,
+        })
+        .collect();
+    Ok(Prog { nodes, tools })
 }
