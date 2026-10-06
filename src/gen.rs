@@ -101,6 +101,28 @@ fn cls() {
 }
 fn quit(c: i64) -> ! { process::exit(c as i32) }
 
+fn scan_json_str(raw: &str, key: &str) -> String {
+    let pat = format!("\"{key}\"");
+    let start = match raw.find(&pat) { Some(k) => k + pat.len(), None => return String::new() };
+    let colon = match raw[start..].find(':') { Some(k) => start + k + 1, None => return String::new() };
+    let rest = raw[colon..].trim_start();
+    if !rest.starts_with('"') { return String::new(); }
+    let mut out = String::new();
+    let mut chars = rest[1..].chars();
+    while let Some(c) = chars.next() {
+        match c {
+            '"' => break,
+            '\\' => {
+                if let Some(e) = chars.next() {
+                    out.push(match e { 'n' => '\n', 't' => '\t', other => other });
+                }
+            }
+            other => out.push(other),
+        }
+    }
+    out
+}
+
 // ---- Phase 5 runtime: HTTP server + JSON ----
 struct Request {
     method: String,
@@ -424,6 +446,25 @@ fn gen_node(n: &Node, ind: usize, out: &mut String) {
             }
             out.push_str(&format!("{pad}}}\n"));
         }
+        Node::ToolDef { sig, body, .. } => {
+            let ret = match sig.ret {
+                Some('i') => " -> i64",
+                Some('f') => " -> f64",
+                Some('s') => " -> String",
+                Some('b') => " -> bool",
+                _ => "",
+            };
+            out.push_str(&format!(
+                "{pad}fn {}({}){} {{\n",
+                sig.name,
+                sig.params.join(", "),
+                ret
+            ));
+            for b in body {
+                gen_node(b, ind + 1, out);
+            }
+            out.push_str(&format!("{pad}}}\n"));
+        }
         Node::Each { var, over, body } => {
             let o = map_builtins(over);
             out.push_str(&format!("{pad}for {var} in {o}.iter() {{\n"));
@@ -511,7 +552,53 @@ fn gen_node(n: &Node, ind: usize, out: &mut String) {
     }
 }
 
+
+pub const MCP_MAIN: &str = r#"static mut TOOLS: Option<Vec<(&'static str, &'static str, fn(String) -> String)>> = None;
+fn main() {
+    let mut tools: Vec<(&'static str, &'static str, fn(String) -> String)> = vec![];
+__TOOL_REG__
+    unsafe { *std::ptr::addr_of_mut!(TOOLS) = Some(tools); }
+    use std::io::BufRead;
+    let stdin = std::io::stdin();
+    for line in stdin.lock().lines() {
+        let line = match line { Ok(l) => l, Err(_) => break };
+        if line.trim().is_empty() { continue; }
+        let m = jstr(jget(&line, "method"));
+        let id = jget(&line, "id");
+        if m == "initialize" {
+            println!("{{\"jsonrpc\":\"2.0\",\"id\":{},\"result\":{{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{{\"tools\":{{}}}},\"serverInfo\":{{\"name\":\"primed\",\"version\":\"0.1\"}}}}}}", id);
+        } else if m == "tools/list" {
+            let tl = unsafe { (&*std::ptr::addr_of!(TOOLS)).as_ref() };
+            let mut arr = String::new();
+            if let Some(tl) = tl {
+                let items: Vec<String> = tl.iter().map(|(n, d, _)| format!("{{\"name\":\"{}\",\"description\":\"{}\"}}", n, d)).collect();
+                arr = items.join(",");
+            }
+            println!("{{\"jsonrpc\":\"2.0\",\"id\":{},\"result\":{{\"tools\":[{}]}}}}", id, arr);
+        } else if m == "tools/call" {
+            // request shape: {"method":"tools/call","params":{"name":"x","arguments":{...}}}
+            // jget only handles flat objects; extract name/arguments from the raw line
+            let tname = scan_json_str(&line, "name");
+            let arg = scan_json_str(&line, "text");
+            let tl = unsafe { (&*std::ptr::addr_of!(TOOLS)).as_ref() };
+            let mut result = format!("unknown tool: {}", tname);
+            if let Some(tl) = tl {
+                for (n, _, h) in tl.iter() {
+                    if *n == tname { result = h(arg); break; }
+                }
+            }
+            let esc = result.replace('\\', "\\\\").replace('"', "\\\"");
+            println!("{{\"jsonrpc\":\"2.0\",\"id\":{},\"result\":{{\"content\":[{{\"type\":\"text\",\"text\":\"{}\"}}]}}}}", id, esc);
+        }
+    }
+}
+"#;
+
 pub fn gen(src: &str, path: &str) -> Result<String, String> {
+    gen_mode(src, path, false)
+}
+
+pub fn gen_mode(src: &str, path: &str, mcp: bool) -> Result<String, String> {
     let prog = parse(src, path)?;
     let mut main_body = String::new();
     let mut fns = String::new();
@@ -525,7 +612,17 @@ pub fn gen(src: &str, path: &str) -> Result<String, String> {
             }
         }
     }
-    Ok(format!("{PRELUDE}\n{fns}\nfn main() {{\n{main_body}}}\n"))
+    if !mcp {
+        return Ok(format!("{PRELUDE}\n{fns}\nfn main() {{\n{main_body}}}\n"));
+    }
+    let mut tool_reg = String::new();
+    for (name, desc) in &prog.tools {
+        tool_reg.push_str(&format!(
+            "    tools.push((\"{name}\", \"{desc}\", {name} as fn(String) -> String));\n"
+        ));
+    }
+    let mcp_main = MCP_MAIN.replace("__TOOL_REG__", &tool_reg);
+    Ok(format!("{PRELUDE}\n{fns}\n{mcp_main}"))
 }
 
 pub const CHEATSHEET: &str = r#"# primed language (.pm) — LLM cheat sheet
@@ -580,6 +677,10 @@ route("/path", h)       # register
 srv(8080)               # serve http
 jget(req, "body") jstr jnum jbool   # parse request json
 jq(k, v) jo(k, v)       # build json
+
+## mcp (phase 6)
+tool name(text s) s "desc"   # MCP tool; body like f; ret = result
+primed mcp file.pm           # serve MCP over stdio
 
 ## cli
 primed run file.pm [args]    # transpile+compile+run

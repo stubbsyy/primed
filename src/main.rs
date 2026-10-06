@@ -14,6 +14,59 @@ fn main() {
         exit(2);
     }
     let cmd = argv[1].as_str();
+    if cmd == "mcp" {
+        let file = &argv[2];
+        let src = match std::fs::read_to_string(file) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("primed: cannot read {file}: {e}");
+                exit(2);
+            }
+        };
+        let rs = match gen::gen_mode(&src, file, true) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("primed: {e}");
+                exit(1);
+            }
+        };
+        let dir = std::env::temp_dir().join("primed-mcp");
+        std::fs::create_dir_all(&dir).ok();
+        let stem = std::path::Path::new(file)
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| "mcp".into());
+        let bin = dir.join(&stem).to_string_lossy().to_string();
+        let rs_path = format!("{bin}.rs");
+        if let Err(e) = std::fs::write(&rs_path, &rs) {
+            eprintln!("primed: cannot write {rs_path}: {e}");
+            exit(1);
+        }
+        let status = std::process::Command::new("rustc")
+            .arg("-O")
+            .arg("--edition")
+            .arg("2021")
+            .arg("-o")
+            .arg(&bin)
+            .arg(&rs_path)
+            .status();
+        match status {
+            Ok(s) if s.success() => {
+                let code = std::process::Command::new(&bin).status()
+                    .map(|s| s.code().unwrap_or(1))
+                    .unwrap_or(1);
+                exit(code);
+            }
+            Ok(s) => {
+                eprintln!("primed: rustc failed: {s}");
+                exit(1);
+            }
+            Err(e) => {
+                eprintln!("primed: cannot invoke rustc: {e}");
+                exit(1);
+            }
+        }
+    }
     if cmd == "cheat" {
         print!("{}", gen::CHEATSHEET);
         exit(0);
