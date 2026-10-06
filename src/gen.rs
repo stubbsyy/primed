@@ -58,6 +58,46 @@ fn now() -> i64 {
 fn int(s: &impl AsRef<str>) -> i64 { s.as_ref().trim().parse().unwrap_or(0) }
 fn strt(x: impl std::fmt::Display) -> String { x.to_string() }
 fn str2(x: impl std::fmt::Display) -> String { x.to_string() }
+
+// ---- Phase 3 runtime: time, stdin, screen ----
+fn clock() -> String {
+    let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs()).unwrap_or(0);
+    let day = secs / 86400;
+    let rem = secs % 86400;
+    let (h, m) = (rem / 3600, (rem % 3600) / 60);
+    let z = day as i64 + 719468;
+    let era = if z >= 0 { z } else { z - 146096 } / 146097;
+    let doe = z - era * 146097;
+    let yoe = (doe - doe/1460 + doe/36524 - doe/146096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365*yoe + yoe/4 - yoe/100);
+    let mp = (5*doy + 2)/153;
+    let d = doy - (153*mp+2)/5 + 1;
+    let mth = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if mth <= 2 { y + 1 } else { y };
+    format!("{y:04}-{mth:02}-{d:02} {h:02}:{m:02}")
+}
+fn today() -> String {
+    let c = clock();
+    c.split(' ').next().unwrap_or("").to_string()
+}
+fn sleep(ms: i64) {
+    std::thread::sleep(std::time::Duration::from_millis(ms as u64));
+}
+fn ask(prompt: impl AsRef<str>) -> String {
+    use std::io::BufRead;
+    print!("{}", prompt.as_ref());
+    use std::io::Write;
+    let _ = std::io::stdout().flush();
+    let mut line = String::new();
+    let _ = std::io::stdin().lock().read_line(&mut line);
+    line.trim().to_string()
+}
+fn cls() {
+    print!("\u{1b}[2J\u{1b}[H");
+    let _ = std::io::stdout().flush();
+}
 fn quit(c: i64) -> ! { process::exit(c as i32) }
 
 // ---- Phase 2 runtime: lists & strings ----
@@ -145,6 +185,11 @@ const BUILTINS: &[(&str, &str, u8)] = &[
     ("seti", "seti", 2),
     ("setii", "setii", 2),
     ("sum", "sum", 1),
+    ("clock", "clock", 0),
+    ("today", "today", 0),
+    ("sleep", "sleep", 0),
+    ("ask", "ask", 0),
+    ("cls", "cls", 0),
 ];
 
 pub fn camel(name: &str) -> String {

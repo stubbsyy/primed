@@ -49,4 +49,19 @@ out=$($BIN run examples/todo.pm list)
 echo "$out" | grep -q "#2 second" || { echo "FAIL todo rm"; exit 1; }
 rm -f "$HOME/todo.txt"
 
+echo "== phase3 =="
+out=$($BIN run examples/journal.pm write "test entry alpha")
+echo "$out" | grep -q "saved" || { echo "FAIL journal write"; exit 1; }
+out=$($BIN run examples/journal.pm today)
+echo "$out" | grep -q "test entry alpha" || { echo "FAIL journal today"; exit 1; }
+out=$($BIN run examples/journal.pm find "alpha")
+echo "$out" | grep -q "test entry alpha" || { echo "FAIL journal find"; exit 1; }
+$BIN run examples/journal.pm clear >/dev/null
+out=$($BIN run examples/journal.pm today)
+echo "$out" | grep -q "no entry" || { echo "FAIL journal cleared"; exit 1; }
+out=$($BIN run examples/timer.pm 0 2>&1 || true)
+echo "$out" | grep -q "usage" || { echo "FAIL timer bounds"; exit 1; }
+out=$($BIN run examples/timer.pm 999 2>&1 || true)
+echo "$out" | grep -q "usage" || { echo "FAIL timer bounds hi"; exit 1; }
+
 echo "ALL PASS"
