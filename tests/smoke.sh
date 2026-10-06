@@ -138,4 +138,17 @@ assert 'note' in d['structs'], 'structs'
 print('ok')
 " || { echo "FAIL doc structs"; exit 1; }
 
+echo "== phase8 watch =="
+cp examples/hello.pm /tmp/pm_watch_test.pm
+$BIN watch /tmp/pm_watch_test.pm world > /tmp/pm_watch.log 2>&1 &
+WPID=$!
+sleep 2
+echo 'f main()
+  p "watched"' > /tmp/pm_watch_test.pm
+sleep 3
+kill $WPID 2>/dev/null
+grep -q "watched" /tmp/pm_watch.log || { echo "FAIL watch rerun"; exit 1; }
+grep -q "recompiled ok" /tmp/pm_watch.log || { echo "FAIL watch recompile"; exit 1; }
+rm -f /tmp/pm_watch_test.pm /tmp/pm_watch.log
+
 echo "ALL PASS"

@@ -157,6 +157,18 @@ agents can self-verify without parsing prose:
 An agent can transpile, inspect signatures, check token cost, and read the
 generated Rust — one command, one parse.
 
+## Phase 8 features: watch mode
+
+`primed watch file.pm [args]` re-transpiles, recompiles, and re-runs your app
+every time you save the file. Transpile and compile errors print with line
+numbers but the watch keeps going — fix and save, it reruns.
+
+```sh
+./target/release/primed watch examples/notes.pm add "write more primed"
+# edit notes.pm in your editor; on every save:
+#   primed: recompiled ok, running...
+```
+
 ## Roadmap
 
 - **Phase 5 — Web/API shorthands**: `srv(port)` starts an HTTP server; `route(path, method)` handlers; JSON helpers (`jget jstr jnum jbool`). Target: a working API in 3 lines of primed.

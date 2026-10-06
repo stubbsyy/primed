@@ -689,6 +689,7 @@ primed install file.pm       # -> ~/.local/bin/<name>
 primed transpile file.pm     # print generated rust
 primed tokens file.pm        # token count report
 primed doc file.pm [--mcp]   # JSON metadata + transpiled rust for agents
+primed watch file.pm [args]  # re-transpile + re-run on every save
 primed cheat                 # this sheet
 
 ## example
