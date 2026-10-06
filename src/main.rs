@@ -67,6 +67,11 @@ fn main() {
             }
         }
     }
+    if cmd == "watch" {
+        let file = &argv[2];
+        let args: Vec<String> = argv[3..].to_vec();
+        watch_cmd(file, &args);
+    }
     if cmd == "doc" {
         let file = &argv[2];
         let src = match std::fs::read_to_string(file) {
@@ -318,4 +323,75 @@ fn est_tokens(s: &str) -> usize {
         })
         .count();
     (chars + syms) / 4
+}
+
+fn watch_cmd(file: &str, args: &[String]) -> ! {
+    let mut last: Option<std::time::SystemTime> = None;
+    let dir = std::env::temp_dir().join("primed-watch");
+    std::fs::create_dir_all(&dir).ok();
+    let stem = std::path::Path::new(file)
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| "app".into());
+    let bin = dir.join(&stem).to_string_lossy().to_string();
+    let rs_path = format!("{bin}.rs");
+    eprintln!("primed: watching {file} (ctrl-c to stop)");
+    loop {
+        let mtime = std::fs::metadata(file)
+            .and_then(|m| m.modified())
+            .ok();
+        let changed = match (last, mtime) {
+            (Some(l), Some(t)) => t != l,
+            (None, Some(_)) => true,
+            _ => false,
+        };
+        if changed {
+            last = mtime;
+            let src = match std::fs::read_to_string(file) {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("primed: cannot read {file}: {e}");
+                    std::thread::sleep(std::time::Duration::from_millis(300));
+                    continue;
+                }
+            };
+            let rs = match gen::gen(&src, file) {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("primed: transpile error: {e}");
+                    std::thread::sleep(std::time::Duration::from_millis(300));
+                    continue;
+                }
+            };
+            if std::fs::write(&rs_path, &rs).is_err() {
+                eprintln!("primed: cannot write {rs_path}");
+                exit(1);
+            }
+            let status = std::process::Command::new("rustc")
+                .arg("-O")
+                .arg("--edition")
+                .arg("2021")
+                .arg("-o")
+                .arg(&bin)
+                .arg(&rs_path)
+                .output();
+            match status {
+                Ok(o) if o.status.success() => {
+                    eprintln!("primed: recompiled ok, running...");
+                    let _ = std::process::Command::new(&bin)
+                        .args(args)
+                        .status();
+                }
+                Ok(o) => {
+                    eprintln!("primed: compile failed:");
+                    eprint!("{}", String::from_utf8_lossy(&o.stderr));
+                }
+                Err(e) => {
+                    eprintln!("primed: cannot invoke rustc: {e}");
+                    exit(1);
+                }
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(300));
+    }
 }
