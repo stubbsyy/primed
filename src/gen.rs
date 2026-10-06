@@ -3,6 +3,7 @@ use crate::parser::{parse, Node};
 const PRELUDE: &str = r#"#![allow(dead_code, unused_parens)]
 use std::fs;
 use std::io::Write as _;
+use std::io::Read as _;
 use std::process;
 
 trait PmAdd<R> { type Out; fn add(self, r: R) -> Self::Out; }
@@ -48,7 +49,7 @@ fn append(p: &impl AsRef<str>, s: impl AsRef<str>) {
         .unwrap_or_else(|e| { eprintln!("append {p}: {e}"); process::exit(1) });
     f.write_all(s.as_ref().as_bytes()).unwrap_or_else(|e| { eprintln!("append {p}: {e}"); process::exit(1) });
 }
-fn home() -> String { std::env::var("HOME").unwrap_or_else(|_| ".".into()) }
+fn pm_home() -> String { std::env::var("HOME").unwrap_or_else(|_| ".".into()) }
 fn arg(i: i64) -> Option<String> { std::env::args().nth(i as usize) }
 fn argn() -> i64 { std::env::args().count() as i64 }
 fn now() -> i64 {
@@ -99,6 +100,166 @@ fn cls() {
     let _ = std::io::stdout().flush();
 }
 fn quit(c: i64) -> ! { process::exit(c as i32) }
+
+// ---- Phase 5 runtime: HTTP server + JSON ----
+struct Request {
+    method: String,
+    path: String,
+    body: String,
+}
+
+struct Response {
+    status: u16,
+    headers: Vec<(String, String)>,
+    body: String,
+}
+
+impl Response {
+    fn new() -> Response {
+        Response { status: 200, headers: vec![], body: String::new() }
+    }
+    fn code(mut self, c: u16) -> Response { self.status = c; self }
+    fn text(mut self, body: impl Into<String>) -> Response {
+        self.headers.push(("Content-Type".into(), "text/plain; charset=utf-8".into()));
+        self.body = body.into();
+        self
+    }
+    fn json(mut self, body: impl Into<String>) -> Response {
+        self.headers.push(("Content-Type".into(), "application/json".into()));
+        self.body = body.into();
+        self
+    }
+}
+
+static mut HANDLERS: Option<Vec<(&'static str, fn(String) -> String)>> = None;
+
+fn leak(s: &str) -> &'static str {
+    let b: &'static mut String = Box::leak(Box::new(s.to_string()));
+    b.as_str()
+}
+
+fn route(path: impl AsRef<str>, handler: fn(String) -> String) {
+    let h: &'static mut Option<Vec<(&'static str, fn(String) -> String)>> =
+        unsafe { &mut *std::ptr::addr_of_mut!(HANDLERS) };
+    let p: &'static str = leak(path.as_ref());
+    if h.is_none() { *h = Some(vec![]); }
+    h.as_mut().unwrap().push((p, handler));
+}
+
+fn srv(port: i64) -> ! {
+    let addr = format!("0.0.0.0:{port}");
+    let listener = std::net::TcpListener::bind(&addr)
+        .unwrap_or_else(|e| { eprintln!("bind {addr}: {e}"); process::exit(1) });
+    eprintln!("primed: serving on http://{addr}");
+    for stream in listener.incoming() {
+        let mut stream = match stream { Ok(s) => s, Err(_) => continue };
+        let mut buf = [0u8; 8192];
+        let n = match stream.read(&mut buf) { Ok(n) => n, Err(_) => continue };
+        let raw = String::from_utf8_lossy(&buf[..n]).to_string();
+        let req_line = raw.lines().next().unwrap_or("").to_string();
+        let mut parts = req_line.split_whitespace();
+        let method = parts.next().unwrap_or("GET").to_string();
+        let path_full = parts.next().unwrap_or("/").to_string();
+        let path = path_full.split('?').next().unwrap_or("/").to_string();
+        let body = raw.split("\r\n\r\n").nth(1).unwrap_or("").to_string();
+        let req_json = jobj(&[
+            ("method", &format!("\"{method}\"")),
+            ("path", &format!("\"{path}\"")),
+            ("body", &format!("\"{body}\"")),
+        ]);
+        let handlers = unsafe { &*std::ptr::addr_of!(HANDLERS) };
+        let mut body_out = format!("not found: {path}");
+        let mut code = 404u16;
+        if let Some(hs) = handlers {
+            for (hp, h) in hs.iter() {
+                if *hp == path { body_out = h(req_json.clone()); code = 200; break; }
+            }
+        }
+        let mut resp = Response::new().code(code).text(body_out);
+        let status_text = match resp.status {
+            200 => "OK", 201 => "Created", 400 => "Bad Request",
+            404 => "Not Found", 500 => "Internal Server Error", _ => "OK",
+        };
+        let mut out = format!("HTTP/1.1 {} {}\r\n", resp.status, status_text);
+        for (k, v) in &resp.headers { out.push_str(&format!("{k}: {v}\r\n")); }
+        out.push_str(&format!("Content-Length: {}\r\n\r\n", resp.body.len()));
+        out.push_str(&resp.body);
+        let _ = stream.write_all(out.as_bytes());
+    }
+    unreachable!()
+}
+
+fn json_skip_ws(b: &[u8], i: &mut usize) {
+    while *i < b.len() && (b[*i] == b' ' || b[*i] == b'\n' || b[*i] == b'\t' || b[*i] == b'\r') { *i += 1; }
+}
+
+fn json_find(b: &[u8], i: &mut usize, key: &str) -> Option<String> {
+    json_skip_ws(b, i);
+    if *i >= b.len() || b[*i] != b'{' { return None; }
+    *i += 1;
+    loop {
+        json_skip_ws(b, i);
+        if *i >= b.len() || b[*i] == b'}' { return None; }
+        if b[*i] != b'"' { return None; }
+        *i += 1;
+        let ks = *i;
+        while *i < b.len() && b[*i] != b'"' { *i += 1; }
+        let k = String::from_utf8_lossy(&b[ks..*i]).to_string();
+        *i += 1;
+        json_skip_ws(b, i);
+        if *i < b.len() && b[*i] == b':' { *i += 1; }
+        json_skip_ws(b, i);
+        let vs = *i;
+        if *i < b.len() && b[*i] == b'"' {
+            *i += 1;
+            while *i < b.len() && b[*i] != b'"' { if b[*i] == b'\\' { *i += 1; } *i += 1; }
+            if *i < b.len() { *i += 1; }
+        } else if *i < b.len() && (b[*i] == b'{' || b[*i] == b'[') {
+            let open = b[*i];
+            let close = if open == b'{' { b'}' } else { b']' };
+            let mut depth = 0;
+            while *i < b.len() {
+                if b[*i] == open { depth += 1; }
+                if b[*i] == close { depth -= 1; if depth == 0 { *i += 1; break; } }
+                *i += 1;
+            }
+        } else {
+            while *i < b.len() && b[*i] != b',' && b[*i] != b'}' { *i += 1; }
+        }
+        let val = String::from_utf8_lossy(&b[vs..(*i).min(b.len())]).trim().to_string();
+        if k == key { return Some(val); }
+        json_skip_ws(b, i);
+        if *i < b.len() && b[*i] == b',' { *i += 1; }
+    }
+}
+
+fn jget(json: impl AsRef<str>, key: impl AsRef<str>) -> String {
+    let (j, k) = (json.as_ref(), key.as_ref());
+    let b = j.as_bytes();
+    let mut i = 0;
+    json_find(b, &mut i, k).unwrap_or_default()
+}
+fn jstr(raw: impl AsRef<str>) -> String {
+    let t = raw.as_ref().trim();
+    if t.starts_with('"') && t.len() >= 2 {
+        t[1..t.len()-1].replace("\\n", "\n").replace("\\t", "\t").replace("\\\"", "\"")
+    } else { String::new() }
+}
+fn jnum(raw: impl AsRef<str>) -> i64 { raw.as_ref().trim().parse().unwrap_or(0) }
+fn jbool(raw: impl AsRef<str>) -> bool { raw.as_ref().trim() == "true" }
+fn jq(k: impl AsRef<str>, v: impl AsRef<str>) -> String {
+    let (k, v) = (k.as_ref(), v.as_ref());
+    let vs = if v.starts_with('{') || v.starts_with('[') || v.starts_with('"')
+        || v == "true" || v == "false" || v.parse::<i64>().is_ok() || v.parse::<f64>().is_ok()
+    { v.to_string() } else { format!("\"{v}\"") };
+    format!("\"{k}\":{vs}")
+}
+fn jo(k: impl AsRef<str>, v: impl AsRef<str>) -> String { format!("{{{}}}", jq(k, v)) }
+fn jobj(pairs: &[(&str, &str)]) -> String {
+    let inner: Vec<String> = pairs.iter().map(|(k, v)| jq(k, v)).collect();
+    format!("{{{}}}", inner.join(","))
+}
+
 
 // ---- Phase 2 runtime: lists & strings ----
 fn ls(items: Vec<String>) -> Vec<String> { items }
@@ -152,7 +313,7 @@ const BUILTINS: &[(&str, &str, u8)] = &[
     ("read", "read", 1),
     ("write", "write", 1),
     ("append", "append", 1),
-    ("home", "home", 0),
+    ("home", "pm_home", 0),
     ("arg", "arg", 0),
     ("argn", "argn", 0),
     ("now", "now", 0),
@@ -190,6 +351,13 @@ const BUILTINS: &[(&str, &str, u8)] = &[
     ("sleep", "sleep", 0),
     ("ask", "ask", 0),
     ("cls", "cls", 0),
+    ("jget", "jget", 1),
+    ("jstr", "jstr", 1),
+    ("jnum", "jnum", 1),
+    ("jbool", "jbool", 1),
+    ("jobj", "jobj", 0),
+    ("jq", "jq", 1),
+    ("jo", "jo", 1),
 ];
 
 pub fn camel(name: &str) -> String {
@@ -405,6 +573,13 @@ p x                    # println
 read(path) write(path, s) append(path, s)   # read of missing file = ""
 ask("prompt")          # stdin line
 arg(i) argn() home() now() clock() today() sleep(ms) cls() quit(code)
+
+## web (phase 5)
+f h(req s) s ...        # handler: req is JSON string, ret body
+route("/path", h)       # register
+srv(8080)               # serve http
+jget(req, "body") jstr jnum jbool   # parse request json
+jq(k, v) jo(k, v)       # build json
 
 ## cli
 primed run file.pm [args]    # transpile+compile+run
