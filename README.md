@@ -51,8 +51,45 @@ See [SPEC.md](SPEC.md) for the full spec and roadmap.
 Builtins: `p` `len` `int` `str` `read` `write` `append` `arg` `args` `home`
 `now`. See [SPEC.md](SPEC.md).
 
+## Phase 2 features
+
+Structs, lists, loops, and string operations:
+
+```primed
+t note { id i, text s }
+
+f main()
+  v ns = [{note id: 1, text: "buy milk"}]
+  each n ns
+    p "#{n.id}: {n.text}"
+
+  m tags = ["a", "b"]
+  push(tags, "c")
+  p join(tags, ",")
+
+  m nums = [5, 3, 9]
+  sorti(nums)
+  p "{sum(nums)}"
+```
+
+| primed                  | meaning                       |
+|-------------------------|-------------------------------|
+| `t name { a i, b s }`   | struct decl                    |
+| `{note id: 1}`          | struct literal                 |
+| `n.id`                  | field access                   |
+| `[1, 2, 3]` / `["a"]`   | list literal                   |
+| `each x list`           | for-in loop                    |
+| `push pop count get`    | list ops (`pushi popi geti` for i64 lists) |
+| `sort sorti sum seti`   | more list ops                  |
+| `split join lines trim` | string ops                     |
+| `upper lower rep rev`   | string ops                     |
+| `has starts ends idx`   | search ops                     |
+| `cut(s, a, b)`          | substring                      |
+
+Examples: `hello.pm`, `notes.pm`, `phase2.pm`, `todo.pm` (full task manager in
+~1.6KB).
+
 ## Roadmap
 
-- Phase 2: structs, lists, string ops, `filter`/`map` shorthands
 - Phase 3: example macOS apps (notes, timer), packaged binaries
 - Phase 4: web/API/MCP shorthands, LLM-oriented tooling (transpile-on-save, size linter)

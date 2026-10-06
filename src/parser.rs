@@ -10,6 +10,7 @@ pub struct FnSig {
 
 #[derive(Debug)]
 pub enum Node {
+    Struct { name: String, fields: Vec<(String, String)> },
     FnDef { sig: FnSig, body: Vec<Node> },
     Var { name: String, mutable: bool, expr: String },
     Assign { name: String, expr: String },
@@ -18,6 +19,7 @@ pub enum Node {
     Ret(Option<String>),
     Expr(String),
     Print(String),
+    Each { var: String, over: String, body: Vec<Node> },
 }
 
 pub struct Prog {
@@ -53,17 +55,26 @@ fn parse_or(t: &[Tok], i: &mut usize) -> Result<String, String> {
 }
 
 fn parse_and(t: &[Tok], i: &mut usize) -> Result<String, String> {
-    let mut l = parse_cmp(t, i)?;
+    let mut l = parse_not(t, i)?;
     loop {
         let hit = matches!(t.get(*i), Some(Tok::Kw("and")) | Some(Tok::Sym("&&")));
         if !hit {
             break;
         }
         *i += 1;
-        let r = parse_cmp(t, i)?;
+        let r = parse_not(t, i)?;
         l = format!("({l} && {r})");
     }
     Ok(l)
+}
+
+fn parse_not(t: &[Tok], i: &mut usize) -> Result<String, String> {
+    if matches!(t.get(*i), Some(Tok::Kw("not"))) {
+        *i += 1;
+        let e = parse_not(t, i)?;
+        return Ok(format!("(!{e})"));
+    }
+    parse_cmp(t, i)
 }
 
 fn parse_cmp(t: &[Tok], i: &mut usize) -> Result<String, String> {
@@ -125,11 +136,6 @@ fn parse_mul(t: &[Tok], i: &mut usize) -> Result<String, String> {
 
 fn parse_unary(t: &[Tok], i: &mut usize) -> Result<String, String> {
     match t.get(*i) {
-        Some(Tok::Kw("not")) => {
-            *i += 1;
-            let e = parse_unary(t, i)?;
-            Ok(format!("(!{e})"))
-        }
         Some(Tok::Sym("-")) => {
             *i += 1;
             let e = parse_unary(t, i)?;
@@ -168,6 +174,31 @@ fn parse_postfix(t: &[Tok], i: &mut usize) -> Result<String, String> {
                 *i += 1;
                 let d = parse_unary(t, i)?;
                 e = format!("pm_dflt({e}, {d})");
+            }
+            Some(Tok::Sym(".")) => {
+                *i += 1;
+                let m = match t.get(*i) {
+                    Some(Tok::Ident(m)) => m.clone(),
+                    _ => return Err("expected field after .".into()),
+                };
+                *i += 1;
+                if matches!(t.get(*i), Some(Tok::Sym("("))) {
+                    *i += 1;
+                    let mut a = Vec::new();
+                    if !matches!(t.get(*i), Some(Tok::Sym(")"))) {
+                        loop {
+                            a.push(parse_or(t, i)?);
+                            match t.get(*i) {
+                                Some(Tok::Sym(",")) => *i += 1,
+                                _ => break,
+                            }
+                        }
+                    }
+                    expect(t, i, ")")?;
+                    e = format!("{}.{}({})", e, m, a.join(", "));
+                } else {
+                    e = format!("{}.{}", e, m);
+                }
             }
             _ => break,
         }
@@ -251,6 +282,57 @@ fn parse_atom(t: &[Tok], i: &mut usize) -> Result<String, String> {
             expect(t, i, ")")?;
             Ok(e)
         }
+        Tok::Sym("[") => {
+            *i += 1;
+            let mut items = Vec::new();
+            if !matches!(t.get(*i), Some(Tok::Sym("]"))) {
+                loop {
+                    items.push(parse_or(t, i)?);
+                    match t.get(*i) {
+                        Some(Tok::Sym(",")) => *i += 1,
+                        _ => break,
+                    }
+                }
+            }
+            expect(t, i, "]")?;
+            Ok(format!("vec![{}]", items.join(", ")))
+        }
+        Tok::Sym("{") => {
+            // struct literal { name field: expr, ... } -> Name { field: expr }
+            // lookahead handled by caller normally; here expect Ident ident ':' pairs
+            *i += 1;
+            let mut name = String::new();
+            match t.get(*i) {
+                Some(Tok::Ident(n)) => {
+                    name = n.clone();
+                    *i += 1;
+                }
+                _ => return Err("expected struct name after {".into()),
+            }
+            let mut fields = Vec::new();
+            while !matches!(t.get(*i), Some(Tok::Sym("}"))) {
+                let fname = match t.get(*i) {
+                    Some(Tok::Ident(f)) => f.clone(),
+                    _ => return Err("expected field name".into()),
+                };
+                *i += 1;
+                expect(t, i, ":")?;
+                let fe = parse_or(t, i)?;
+                fields.push(format!("{fname}: {fe}"));
+                match t.get(*i) {
+                    Some(Tok::Sym(",")) => *i += 1,
+                    _ => break,
+                }
+            }
+            expect(t, i, "}")?;
+            let mut c = name.chars();
+            let mut camel = String::new();
+            if let Some(f) = c.next() {
+                camel.extend(f.to_uppercase());
+                camel.push_str(c.as_str());
+            }
+            Ok(format!("{camel} {{ {} }}", fields.join(", ")))
+        }
         other => Err(format!("unexpected token {other:?}")),
     }
 }
@@ -274,6 +356,7 @@ fn parse_block(
     top: bool,
 ) -> Result<Vec<Node>, String> {
     let mut out = Vec::new();
+    let mut block_mut: HashSet<String> = HashSet::new();
     while *i < lines.len() {
         let (ind, toks, ln) = &lines[*i];
         if *ind < indent {
@@ -287,6 +370,65 @@ fn parse_block(
         *i += 1;
 
         match toks.first() {
+            Some(Tok::Kw("t")) if top => {
+                if !matches!(toks.get(1), Some(Tok::Ident(_)))
+                    || !matches!(toks.get(2), Some(Tok::Sym("{")))
+                {
+                    return Err(format!("line {ln}: t needs Name {{ fields }}"));
+                }
+                let name = match &toks[1] {
+                    Tok::Ident(n) => n.clone(),
+                    _ => unreachable!(),
+                };
+                let mut j = 3;
+                let mut fields: Vec<(String, String)> = Vec::new();
+                while !matches!(toks.get(j), Some(Tok::Sym("}"))) {
+                    let fname = match toks.get(j) {
+                        Some(Tok::Ident(f)) => f.clone(),
+                        _ => {
+                            return Err(format!(
+                                "line {ln}: bad field at pos {}",
+                                j - 2
+                            ))
+                        }
+                    };
+                    j += 1;
+                    let fty = match toks.get(j) {
+                        Some(Tok::Ident(t)) if t.len() == 1 => {
+                            let r = ty(t)?;
+                            j += 1;
+                            r
+                        }
+                        Some(Tok::Ident(t)) if t.len() == 2 && t == "ls" => {
+                            j += 1;
+                            "Vec<String>"
+                        }
+                        Some(Tok::Ident(t)) if t.len() == 2 && t == "li" => {
+                            j += 1;
+                            "Vec<i64>"
+                        }
+                        _ => {
+                            return Err(format!(
+                                "line {ln}: field {fname} needs a type (i/f/s/b/ls/li)"
+                            ))
+                        }
+                    };
+                    fields.push((fname, fty.to_string()));
+                    match toks.get(j) {
+                        Some(Tok::Sym(",")) => j += 1,
+                        Some(Tok::Sym("}")) => {}
+                        _ => {
+                            return Err(format!(
+                                "line {ln}: expected , or }} in struct"
+                            ))
+                        }
+                    }
+                }
+                if toks.len() != j + 1 {
+                    return Err(format!("line {ln}: trailing tokens after struct"));
+                }
+                out.push(Node::Struct { name, fields });
+            }
             Some(Tok::Kw("f")) => {
                 if !top {
                     return Err(format!(
@@ -356,6 +498,20 @@ fn parse_block(
                     Some(Tok::Ident(n)) => n.clone(),
                     _ => return Err(format!("line {ln}: v/m needs a name")),
                 };
+                if ism && block_mut.contains(&name) {
+                    // re-binding an existing mutable = assignment
+                    if !matches!(toks.get(2), Some(Tok::Sym("="))) {
+                        return Err(format!("line {ln}: m needs ="));
+                    }
+                    let mut k = 3;
+                    let expr = parse_expr(&toks, &mut k)
+                        .map_err(|e| format!("line {ln}: {e}"))?;
+                    if k != toks.len() {
+                        return Err(format!("line {ln}: trailing tokens"));
+                    }
+                    out.push(Node::Assign { name, expr });
+                    continue;
+                }
                 if !matches!(toks.get(2), Some(Tok::Sym("="))) {
                     return Err(format!("line {ln}: v/m needs ="));
                 }
@@ -367,6 +523,7 @@ fn parse_block(
                 }
                 if ism {
                     mutable.insert(name.clone());
+                    block_mut.insert(name.clone());
                 }
                 out.push(Node::Var { name, mutable: ism, expr });
             }
@@ -441,6 +598,21 @@ fn parse_block(
                     }
                 }
                 out.push(Node::If { arms });
+            }
+            Some(Tok::Kw("each")) => {
+                // each x list-expr
+                let var = match toks.get(1) {
+                    Some(Tok::Ident(v)) => v.clone(),
+                    _ => return Err(format!("line {ln}: each needs a variable")),
+                };
+                let mut k = 2;
+                let over = parse_expr(&toks, &mut k)
+                    .map_err(|e| format!("line {ln}: {e}"))?;
+                if k != toks.len() {
+                    return Err(format!("line {ln}: trailing tokens"));
+                }
+                let body = parse_block(lines, i, indent + 1, mutable, false)?;
+                out.push(Node::Each { var, over, body });
             }
             Some(Tok::Kw("w")) => {
                 let mut k = 1;

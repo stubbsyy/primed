@@ -36,7 +36,7 @@ fn pm_dflt(o: Option<String>, d: impl Into<String>) -> String { o.unwrap_or_else
 fn pm_len(s: &impl AsRef<str>) -> i64 { s.as_ref().chars().count() as i64 }
 fn read(p: &impl AsRef<str>) -> String {
     let p = p.as_ref();
-    fs::read_to_string(p).unwrap_or_else(|e| { eprintln!("read {p}: {e}"); process::exit(1) })
+    fs::read_to_string(p).unwrap_or_default()
 }
 fn write(p: &impl AsRef<str>, s: impl AsRef<str>) {
     let p = p.as_ref();
@@ -57,24 +57,110 @@ fn now() -> i64 {
 }
 fn int(s: &impl AsRef<str>) -> i64 { s.as_ref().trim().parse().unwrap_or(0) }
 fn strt(x: impl std::fmt::Display) -> String { x.to_string() }
+fn str2(x: impl std::fmt::Display) -> String { x.to_string() }
 fn quit(c: i64) -> ! { process::exit(c as i32) }
+
+// ---- Phase 2 runtime: lists & strings ----
+fn ls(items: Vec<String>) -> Vec<String> { items }
+fn li(items: Vec<i64>) -> Vec<i64> { items }
+fn push(v: &mut Vec<String>, s: impl AsRef<str>) { v.push(s.as_ref().to_string()) }
+fn pushi(v: &mut Vec<i64>, n: i64) { v.push(n) }
+fn pop(v: &mut Vec<String>) -> Option<String> { v.pop() }
+fn popi(v: &mut Vec<i64>) -> Option<i64> { v.pop() }
+fn count(v: &Vec<String>) -> i64 { v.len() as i64 }
+fn counti(v: &Vec<i64>) -> i64 { v.len() as i64 }
+fn get(v: &Vec<String>, i: i64) -> String { v.get(i as usize).cloned().unwrap_or_default() }
+fn geti(v: &Vec<i64>, i: i64) -> i64 { v.get(i as usize).copied().unwrap_or(0) }
+fn seti(v: &mut Vec<String>, i: i64, s: impl Into<String>) {
+    let k = i as usize;
+    while v.len() <= k { v.push(String::new()); }
+    v[k] = s.into();
+}
+fn setii(v: &mut Vec<i64>, i: i64, n: i64) {
+    let k = i as usize;
+    while v.len() <= k { v.push(0); }
+    v[k] = n;
+}
+fn join(v: &Vec<String>, sep: impl AsRef<str>) -> String { v.join(sep.as_ref()) }
+fn split(s: impl AsRef<str>, sep: impl AsRef<str>) -> Vec<String> {
+    s.as_ref().split(sep.as_ref()).map(|x| x.to_string()).collect()
+}
+fn lines_of(s: impl AsRef<str>) -> Vec<String> {
+    s.as_ref().lines().map(|x| x.to_string()).collect()
+}
+fn trim(s: &impl AsRef<str>) -> String { s.as_ref().trim().to_string() }
+fn upper(s: &impl AsRef<str>) -> String { s.as_ref().to_uppercase() }
+fn lower(s: &impl AsRef<str>) -> String { s.as_ref().to_lowercase() }
+fn rep(s: &impl AsRef<str>, n: i64) -> String { s.as_ref().repeat(n as usize) }
+fn has(s: &impl AsRef<str>, sub: impl AsRef<str>) -> bool { s.as_ref().contains(sub.as_ref()) }
+fn starts(s: &impl AsRef<str>, sub: impl AsRef<str>) -> bool { s.as_ref().starts_with(sub.as_ref()) }
+fn ends(s: &impl AsRef<str>, sub: impl AsRef<str>) -> bool { s.as_ref().ends_with(sub.as_ref()) }
+fn idx(s: &impl AsRef<str>, sub: impl AsRef<str>) -> i64 {
+    match s.as_ref().find(sub.as_ref()) { Some(k) => k as i64, None => -1 }
+}
+fn cut(s: &impl AsRef<str>, a: i64, b: i64) -> String { pm_slice(s.as_ref(), a, b) }
+fn rev(s: &impl AsRef<str>) -> String { s.as_ref().chars().rev().collect() }
+fn sort(v: &mut Vec<String>) { v.sort(); }
+fn sorti(v: &mut Vec<i64>) { v.sort(); }
+fn revv(v: &mut Vec<String>) { v.reverse(); }
+fn sum(v: &Vec<i64>) -> i64 { v.iter().sum() }
 "#;
 
 // (primed name, rust prefix, borrow_first_arg)
-const BUILTINS: &[(&str, &str, bool)] = &[
-    ("len", "pm_len", true),
-    ("read", "read", true),
-    ("write", "write", true),
-    ("append", "append", true),
-    ("home", "home", false),
-    ("arg", "arg", false),
-    ("argn", "argn", false),
-    ("now", "now", false),
-    ("int", "int", true),
-    ("strt", "strt", false),
-    ("quit", "quit", false),
-    ("char", "pm_index", true),
+const BUILTINS: &[(&str, &str, u8)] = &[
+    ("len", "pm_len", 1),
+    ("read", "read", 1),
+    ("write", "write", 1),
+    ("append", "append", 1),
+    ("home", "home", 0),
+    ("arg", "arg", 0),
+    ("argn", "argn", 0),
+    ("now", "now", 0),
+    ("int", "int", 1),
+    ("strt", "strt", 0),
+    ("quit", "quit", 0),
+    ("char", "pm_index", 1),
+    ("push", "push", 2),
+    ("pushi", "pushi", 2),
+    ("pop", "pop", 2),
+    ("popi", "popi", 2),
+    ("count", "count", 1),
+    ("get", "get", 1),
+    ("geti", "geti", 1),
+    ("join", "join", 1),
+    ("split", "split", 1),
+    ("lines", "lines_of", 1),
+    ("trim", "trim", 1),
+    ("upper", "upper", 1),
+    ("lower", "lower", 1),
+    ("rep", "rep", 1),
+    ("has", "has", 1),
+    ("starts", "starts", 1),
+    ("ends", "ends", 1),
+    ("idx", "idx", 1),
+    ("cut", "cut", 1),
+    ("rev", "rev", 1),
+    ("sort", "sort", 2),
+    ("sorti", "sorti", 2),
+    ("seti", "seti", 2),
+    ("setii", "setii", 2),
+    ("sum", "sum", 1),
 ];
+
+pub fn camel(name: &str) -> String {
+    let mut out = String::new();
+    for (k, part) in name.split('_').enumerate() {
+        if k > 0 {
+            out.push('_');
+        }
+        let mut c = part.chars();
+        if let Some(f) = c.next() {
+            out.extend(f.to_uppercase());
+            out.push_str(c.as_str());
+        }
+    }
+    out
+}
 
 fn map_builtins(e: &str) -> String {
     let b: Vec<char> = e.chars().collect();
@@ -94,8 +180,10 @@ fn map_builtins(e: &str) -> String {
                 {
                     out.push_str(rust);
                     out.push('(');
-                    if *brw {
-                        out.push('&');
+                    match brw {
+                        1 => out.push('&'),
+                        2 => out.push_str("&mut "),
+                        _ => {}
                     }
                     i += 1;
                     continue;
@@ -113,6 +201,24 @@ fn map_builtins(e: &str) -> String {
 fn gen_node(n: &Node, ind: usize, out: &mut String) {
     let pad = "  ".repeat(ind);
     match n {
+        Node::Struct { name, fields } => {
+            let rn = camel(name);
+            out.push_str(&format!(
+                "{pad}#[derive(Debug, Clone)]\nstruct {rn} {{\n"
+            ));
+            for (f, t) in fields {
+                out.push_str(&format!("{pad}  {f}: {t},\n"));
+            }
+            out.push_str(&format!("{pad}}}\n"));
+        }
+        Node::Each { var, over, body } => {
+            let o = map_builtins(over);
+            out.push_str(&format!("{pad}for {var} in {o}.iter() {{\n"));
+            for b in body {
+                gen_node(b, ind + 1, out);
+            }
+            out.push_str(&format!("{pad}}}\n"));
+        }
         Node::FnDef { sig, body } => {
             if sig.name == "main" {
                 for b in body {

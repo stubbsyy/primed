@@ -135,6 +135,8 @@ pub fn lex_line(line: &str) -> Result<Vec<Tok>, String> {
                 "not" => Some("not"),
                 "true" => Some("true"),
                 "false" => Some("false"),
+                "t" => Some("t"),
+                "each" => Some("each"),
                 _ => None,
             };
             match kw {
@@ -175,6 +177,9 @@ pub fn lex_line(line: &str) -> Result<Vec<Tok>, String> {
             ']' => Some("]"),
             ':' => Some(":"),
             '?' => Some("?"),
+            '{' => Some("{"),
+            '}' => Some("}"),
+            '.' => Some("."),
             _ => None,
         };
         match sym1 {
