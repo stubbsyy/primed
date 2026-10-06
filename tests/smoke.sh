@@ -64,4 +64,12 @@ echo "$out" | grep -q "usage" || { echo "FAIL timer bounds"; exit 1; }
 out=$($BIN run examples/timer.pm 999 2>&1 || true)
 echo "$out" | grep -q "usage" || { echo "FAIL timer bounds hi"; exit 1; }
 
+echo "== phase4 =="
+out=$($BIN cheat)
+echo "$out" | grep -q "primed language" || { echo "FAIL cheat sheet"; exit 1; }
+out=$($BIN tokens examples/hello.pm)
+echo "$out" | grep -q "tokens" || { echo "FAIL tokens report"; exit 1; }
+out=$($BIN transpile examples/hello.pm)
+echo "$out" | grep -q "fn main" || { echo "FAIL transpile output"; exit 1; }
+
 echo "ALL PASS"

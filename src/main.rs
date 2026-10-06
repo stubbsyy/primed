@@ -6,13 +6,18 @@ mod parser;
 
 fn main() {
     let argv: Vec<String> = std::env::args().collect();
-    if argv.len() < 3 {
+    let cmds_no_file = ["cheat"];
+    if argv.len() < 3 && !cmds_no_file.contains(&argv[1].as_str()) {
         eprintln!(
-            "usage: primed run|build|install|transpile file.pm [args... | -o out]"
+            "usage: primed run|build|install|transpile|tokens file.pm [args... | -o out] | primed cheat"
         );
         exit(2);
     }
     let cmd = argv[1].as_str();
+    if cmd == "cheat" {
+        print!("{}", gen::CHEATSHEET);
+        exit(0);
+    }
     let file = &argv[2];
     let src = match std::fs::read_to_string(file) {
         Ok(s) => s,
@@ -21,6 +26,33 @@ fn main() {
             exit(2);
         }
     };
+    if cmd == "tokens" {
+        let rs = match gen::gen(&src, file) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("primed: {e}");
+                exit(1);
+            }
+        };
+        let pm_tokens = est_tokens(&src);
+        let rs_tokens = est_tokens(&rs);
+        println!("file: {file}");
+        println!("primed source: {} bytes, ~{} tokens", src.len(), pm_tokens);
+        println!(
+            "generated rust: {} bytes, ~{} tokens",
+            rs.len(),
+            rs_tokens
+        );
+        println!(
+            "source-only ratio (primed vs equivalent hand rust, est): ~{}x",
+            (rs_tokens as f64 / 3.0 / pm_tokens as f64 * 10.0).round() / 10.0
+        );
+        println!(
+            "pipeline check: transpile {} -> rustc -> binary",
+            if pm_tokens > 0 { "ok" } else { "?" }
+        );
+        exit(0);
+    }
     let rs = match gen::gen(&src, file) {
         Ok(s) => s,
         Err(e) => {
@@ -148,4 +180,17 @@ fn main() {
             exit(2);
         }
     }
+}
+
+fn est_tokens(s: &str) -> usize {
+    // rough LLM tokenizer estimate: ~4 chars/token for code, adjust for
+    // symbol-heavy content
+    let chars = s.chars().count();
+    let syms = s
+        .chars()
+        .filter(|c| {
+            !c.is_alphanumeric() && !c.is_whitespace() && *c != '_'
+        })
+        .count();
+    (chars + syms) / 4
 }
