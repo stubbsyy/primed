@@ -359,3 +359,64 @@ pub fn gen(src: &str, path: &str) -> Result<String, String> {
     }
     Ok(format!("{PRELUDE}\n{fns}\nfn main() {{\n{main_body}}}\n"))
 }
+
+pub const CHEATSHEET: &str = r#"# primed language (.pm) — LLM cheat sheet
+
+Compiles to native Rust. Write minimal, dense code. 2-space indent blocks, no semicolons, # comments.
+
+## types
+i=i64 f=f64 s=String b=bool ls=Vec<String> li=Vec<i64>
+
+## decls
+f name(a i, b s) s    # fn, typed params, optional return type
+v x = expr            # immutable let
+m x = expr            # mutable let
+x = expr              # assignment (m-declared only)
+
+## control
+if cond / elif cond / e        # else
+w cond                          # while
+each x list                     # for-in
+ret expr                        # return
+
+## exprs
+"a {x} b"              # interpolation, any expr in {}
++ - * / %              # + also concatenates strings
+== != < <= > >= and or not
+x[i] x[a:b] x[a:]      # char / slice
+arg(1) ? "default"     # Option default
+
+## structs
+t name { id i, text s }
+{note id: 1, text: "x"}    # literal (camel-cased internally)
+n.id                       # field
+
+## lists
+[1, 2] ["a", "b"]
+push(l, x) pushi count(l) get(l, i) geti seti(l, i, x)
+pop(l) popi sort(l) sorti sum(l) join(l, ",") split(s, ",") lines(s)
+
+## strings
+trim upper lower rep(s, n) rev has(s, sub) starts ends idx cut(s, a, b)
+len(s) int(s) str(x)
+
+## io/system
+p x                    # println
+read(path) write(path, s) append(path, s)   # read of missing file = ""
+ask("prompt")          # stdin line
+arg(i) argn() home() now() clock() today() sleep(ms) cls() quit(code)
+
+## cli
+primed run file.pm [args]    # transpile+compile+run
+primed build file.pm -o out  # native binary
+primed install file.pm       # -> ~/.local/bin/<name>
+primed transpile file.pm     # print generated rust
+primed tokens file.pm        # token count report
+primed cheat                 # this sheet
+
+## example
+f main()
+  v cmd = arg(1) ? "list"
+  if cmd == "add"
+    append(home() + "/notes.txt", arg(2) + "\n")
+"#;

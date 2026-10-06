@@ -111,6 +111,31 @@ journal write "shipped phase 3"
 journal find "phase"
 ```
 
+## Phase 4 features: LLM tooling
+
+**Token report** — measure the token cost of any program:
+
+```sh
+./target/release/primed tokens examples/todo.pm
+# primed source: 1718 bytes, ~516 tokens
+# generated rust: 10385 bytes, ~3244 tokens
+```
+
+**Cheat sheet** — the entire language spec, sized to paste into an LLM system
+prompt (~150 tokens):
+
+```sh
+./target/release/primed cheat
+```
+
+The intended workflow for LLM-driven development:
+
+1. `primed cheat` output goes into the system prompt (one-time, tiny).
+2. The model writes dense `.pm` source — a full task manager costs ~500 tokens
+   instead of ~3000+ for hand-written Rust.
+3. `primed run file.pm` verifies; `primed tokens file.pm` reports cost;
+   `primed install file.pm` ships it.
+
 ## Roadmap
 
-- Phase 4: web/API/MCP shorthands, LLM-oriented tooling (transpile-on-save, size linter)
+- Phase 5: web/API/MCP shorthands, JSON output mode, transpile-on-save watch
